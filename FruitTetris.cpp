@@ -19,6 +19,8 @@ Modified in Sep 2014 by Honghua Li (honghual@sfu.ca).
 #include <iostream>
 #include <unistd.h>
 
+#define TILE_FALL_SPEED 30
+
 using namespace std;
 
 
@@ -68,6 +70,8 @@ vec4 orange = vec4(1.0, 0.5, 0.0, 1.0);
 vec4 white  = vec4(1.0, 1.0, 1.0, 1.0);
 vec4 black  = vec4(0.0, 0.0, 0.0, 1.0); 
  
+// what color is each tile cell 
+vec4 tileCellColor[4];
 //board[x][y] represents whether the cell (x,y) is occupied
 bool board[10][20]; 
 
@@ -110,6 +114,7 @@ void updatetile()
 		GLfloat x = tilepos.x + tile[i].x; 
 
 		GLfloat y = tilepos.y + tile[i].y;
+		// adjust if the tile is 
 		if (y > 19) {
 			tilepos.y = tilepos.y - 1;
 			y = 19;
@@ -146,8 +151,13 @@ void newtile()
 	updatetile(); 
 	// Update the color VBO of current tile
 	vec4 newcolours[24];
-	for (int i = 0; i < 24; i++)
-		newcolours[i] = orange; // You should randomlize the color
+	for (int i = 0; i < 4; i++) {
+		vec4 randomColour = white;
+		for (int j=0; j < 6; j++) {
+			newcolours[(i * 6) + j] = randomColour;
+		}
+		tileCellColor[i] = randomColour; // You should randomlize the color
+	}
 	glBindBuffer(GL_ARRAY_BUFFER, vboIDs[5]); // Bind the VBO containing current tile vertex colours
 	glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(newcolours), newcolours); // Put the colour data in the VBO
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -293,6 +303,16 @@ void init()
 	glBindVertexArray(0);
 	glClearColor(0, 0, 0, 0);
 }
+//-------------------------------------------------------------------------------------------------------------------
+
+void movetiledown(int value)
+{
+	tilepos.y = tilepos.y - 1;
+	updatetile();
+	//glutPostRedisplay();
+	glutTimerFunc(TILE_FALL_SPEED, movetiledown, 0);
+
+}
 
 //-------------------------------------------------------------------------------------------------------------------
 
@@ -316,7 +336,28 @@ void checkfullrow(int row)
 // Places the current tile - update the board vertex colour VBO and the array maintaining occupied cells
 void settile()
 {
-	
+	glBindBuffer(GL_ARRAY_BUFFER, vboIDs[3]); 
+
+	// For each of the 4 'cells' of the tile,
+	for (int i = 0; i < 4; i++) 
+	{
+		// Calculate the grid coordinates of the cell
+		GLuint x = tilepos.x + tile[i].x; 
+
+		GLuint y = tilepos.y + tile[i].y;
+		// adjust if the tile is 
+		// Create the 4 corners of the square - these vertices are using location in pixels
+		// These vertices are later converted by the vertex shader
+		for (int j=0; j < 6; j++) {
+			boardcolours[(x*6) + (y*60) + j] = tileCellColor[i];
+		}
+		board[x][y] = true;
+
+	}
+	glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(boardcolours), boardcolours); 
+
+	glBindVertexArray(0);
+
 }
 
 //-------------------------------------------------------------------------------------------------------------------
@@ -325,7 +366,10 @@ void settile()
 // Returns true if the tile was successfully moved, or false if there was some issue
 bool movetile(vec2 direction)
 {
-	return false;
+	tilepos.x = tilepos.x + direction.x;
+	tilepos.y = tilepos.y - direction.y;
+	updatetile();
+	return true;
 }
 //-------------------------------------------------------------------------------------------------------------------
 
@@ -397,9 +441,28 @@ void keyboard(unsigned char key, int x, int y)
 }
 
 //-------------------------------------------------------------------------------------------------------------------
+void checkforbottom() 
+{
+	for (int i=0; i < 4; i++) {
+		GLuint x = tilepos.x + tile[i].x; 
+		GLuint y = tilepos.y + tile[i].y;	
+
+		if (y == 0 || board[x][y-1] == true) {
+			settile();
+			newtile();
+			break;
+		}
+
+	}
+	glutPostRedisplay();
+
+}
+
+//-------------------------------------------------------------------------------------------------------------------
 
 void idle(void)
 {
+	checkforbottom();
 	glutPostRedisplay();
 }
 
@@ -421,6 +484,7 @@ int main(int argc, char **argv)
 	glutSpecialFunc(special);
 	glutKeyboardFunc(keyboard);
 	glutIdleFunc(idle);
+	glutTimerFunc(TILE_FALL_SPEED, movetiledown, 0);
 
 	glutMainLoop(); // Start main loop
 	return 0;
