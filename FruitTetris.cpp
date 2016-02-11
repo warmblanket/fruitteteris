@@ -20,10 +20,24 @@ Modified in Sep 2014 by Honghua Li (honghual@sfu.ca).
 #include <unistd.h>
 
 #define TILE_FALL_SPEED 30
-
+#define DEFAULT_TILE_FALL_SPEED 400
+#define NUMBER_OF_COLORS 5
 using namespace std;
 
 
+// forward declarations
+
+void moveBlockLeft();
+void moveBlockRight();
+void checkforbottom();
+bool collidingWithExisitingTile();
+int youCanMoveUp();
+void moveUp(int tilesToMoveUp);
+int youCanMoveLeft();
+void moveLeft(int tilesToMoveLeft);
+int youCanMoveRight();
+void moveRight(int tilesToMoveRight);
+void revertBack(); //ie dont change anything
 // xsize and ysize represent the window size - updated if window is reshaped to prevent stretching of the game
 int xsize = 400; 
 int ysize = 720;
@@ -35,10 +49,10 @@ vec2 tilepos = vec2(5, 19); // The position of the current tile using grid coord
 // An array storing all possible orientations of all possible tiles
 // The 'tile' array will always be some element [i][j] of this array (an array of vec2)
 vec2 allRotationsLshape[4][4] = 
-	{{vec2(0, 0), vec2(-1,0), vec2(1, 0), vec2(-1,-1)},
-	{vec2(0, 0), vec2(0, -1), vec2(0,-2), vec2(1, -2)},     
-	{vec2(1, 1), vec2(-1,0), vec2(0, 0), vec2(1,  0)},  
-	{vec2(-1,1), vec2(0, 1), vec2(0, 0), vec2(0, -1)}};
+	{{vec2(-1, -1), vec2(-1, 0), vec2(0, 0), vec2(1, 0)},
+	{vec2(1, -1), vec2(0, -1), vec2(0, 0), vec2(0, 1)},     
+	{vec2(1, 1), vec2(1, 0), vec2(0, 0), vec2(-1,  0)},  
+	{vec2(-1, 1), vec2(0, 1), vec2(0, 0), vec2(0, -1)}};
 
 vec2 allRotationsTshape[4][4] = 
 	{{vec2(0,0), vec2(-1,0), vec2(1,0), vec2(0,-1)}, //regular T
@@ -48,20 +62,27 @@ vec2 allRotationsTshape[4][4] =
 
 vec2 allRotationsIshape[4][4] =
 	{{vec2(-2,0), vec2(-1,0), vec2(0,0), vec2(1,0)},
-	 {vec2(0,1), vec2(0,0), vec2(0,-1), vec2(0,-2)},
+	 {vec2(0,-2), vec2(0,-1), vec2(0,0), vec2(0,1)},
 	 {vec2(-2,0), vec2(-1,0), vec2(0,0), vec2(1,0)},
-	 {vec2(0,1), vec2(0,0), vec2(0,-1), vec2(0,-2)}};
+	 {vec2(0,-2), vec2(0,-1), vec2(0,0), vec2(0,1)}};
 
-vec2 allRotationsSshape[4][4] =
+vec2 allRotationsSRightshape[4][4] =
 	{{vec2(-1,-1), vec2(0,-1), vec2(0,0), vec2(1,0)},
-	 {vec2(0,0), vec2(0, 1), vec2(1,-1), vec2(1,0)},
+	 {vec2(1,-1), vec2(1, 0), vec2(0,0), vec2(0,1)},
 	 {vec2(-1,-1), vec2(0,-1), vec2(0,0), vec2(1,0)},
-	 {vec2(0,0), vec2(0, 1), vec2(1,-1), vec2(1,0)}};
+	 {vec2(1,-1), vec2(1, 0), vec2(0,0), vec2(0,1)}};
 
-vec2 allRotations[4][4][4] = {
+vec2 allRotationsSLeftshape[4][4] =
+	{{vec2(1,-1), vec2(0,-1), vec2(0,0), vec2(-1, 0)},
+	 {vec2(1, 1), vec2(1, 0), vec2(0,0), vec2(0, -1)},
+	 {vec2(1,-1), vec2(0,-1), vec2(0,0), vec2(-1, 0)},
+	 {vec2(1, 1), vec2(1, 0), vec2(0,0), vec2(0, -1)}};
+
+vec2 allRotations[5][4][4] = {
 	allRotationsTshape,
 	allRotationsLshape,
-	allRotationsSshape,
+	allRotationsSRightshape,
+	allRotationsSLeftshape,
 	allRotationsIshape
 };
 
@@ -69,7 +90,13 @@ vec2 allRotations[4][4][4] = {
 vec4 orange = vec4(1.0, 0.5, 0.0, 1.0); 
 vec4 white  = vec4(1.0, 1.0, 1.0, 1.0);
 vec4 black  = vec4(0.0, 0.0, 0.0, 1.0); 
- 
+vec4 red 	= vec4(1.0, 0.0, 0.0, 1.0);
+vec4 purple = vec4(1.0, 0.0, 1.0, 1.0);
+vec4 yellow = vec4(1.0, 1.0, 0.0, 1.0);
+vec4 green 	= vec4(0.0, 1.0, 0.0, 1.0);
+// array of colors
+vec4 colors[NUMBER_OF_COLORS] = {orange, red, purple, yellow, green};
+
 // what color is each tile cell 
 vec4 tileCellColor[4];
 //board[x][y] represents whether the cell (x,y) is occupied
@@ -83,6 +110,16 @@ vec4 boardcolours[1200];
 // location of vertex attributes in the shader program
 GLuint vPosition;
 GLuint vColor;
+
+
+// the speed at which the tile falls, starts with a default speed of 300
+// (in reality its the time in ms before movetiledown() is called again)
+int tileFallSpeed = DEFAULT_TILE_FALL_SPEED;
+
+int curRotation; //index which holds the current rotation of the type of tile - eg: T or |- or -| 
+vec2 curTileType[4][4]; 
+
+
 
 // locations of uniform variables in shader program
 GLuint locxsize;
@@ -104,6 +141,7 @@ int randomNumber(int min, int max)
 // When the current tile is moved or rotated (or created), update the VBO containing its vertex position data
 void updatetile()
 {
+
 	// Bind the VBO containing current tile vertex positions
 	glBindBuffer(GL_ARRAY_BUFFER, vboIDs[4]); 
 
@@ -115,11 +153,7 @@ void updatetile()
 
 		GLfloat y = tilepos.y + tile[i].y;
 		// adjust if the tile is 
-		if (y > 19) {
-			tilepos.y = tilepos.y - 1;
-			y = 19;
-			updatetile();
-		}
+
 		// Create the 4 corners of the square - these vertices are using location in pixels
 		// These vertices are later converted by the vertex shader
 		vec4 p1 = vec4(33.0 + (x * 33.0), 33.0 + (y * 33.0), .4, 1); 
@@ -146,13 +180,47 @@ void newtile()
 	tilepos = vec2(5 , 19); // Put the tile at the top of the board
 
 	// Update the geometry VBO of current tile
-	for (int i = 0; i < 4; i++)
-		tile[i] = allRotations[1][2][i]; // Get the 4 pieces of the new tile
+	int randTileType = rand() % 5; 
+	int randRotation = rand() % 4;
+
+	randTileType = 4; //force I shape
+	//randRotation = 0;
+	for (int i = 0; i < 4; i++) {
+		tile[i] = allRotations[randTileType][randRotation][i]; // Get the 4 pieces of the new tile
+	}
+
+	curRotation = randRotation; //set what rotation the current shape is using
+	for (int i=0; i<4; i++) {
+
+		int x = tilepos.x + tile[i].x; 
+		int y = tilepos.y + tile[i].y;
+
+		for (int j=0; j<4; j++) {
+			curTileType[i][j] = allRotations[randTileType][i][j]; //load the current tile type with the right shape
+		}
+		if (y > 19) { //bring the tilestd:: down if extends beyond the grid
+			tilepos.y = tilepos.y - 1;
+			y = 19;
+		}
+	}
+
+	for (int i = 0; i < 4; i++) 
+	{
+
+		int x = tilepos.x + tile[i].x; 
+		int y = tilepos.y + tile[i].y;
+
+		if (board[x][y] == true) {
+			std::cout<<"rewrwerew";
+			exit(EXIT_SUCCESS);
+		}
+
+	}
 	updatetile(); 
 	// Update the color VBO of current tile
 	vec4 newcolours[24];
 	for (int i = 0; i < 4; i++) {
-		vec4 randomColour = white;
+		vec4 randomColour = colors[rand() % NUMBER_OF_COLORS];
 		for (int j=0; j < 6; j++) {
 			newcolours[(i * 6) + j] = randomColour;
 		}
@@ -307,10 +375,16 @@ void init()
 
 void movetiledown(int value)
 {
-	tilepos.y = tilepos.y - 1;
+	
+	checkforbottom();
+	updatetile();
+	if (tilepos.y > 0)
+		tilepos.y = tilepos.y - 1;
+	
+	checkforbottom();
 	updatetile();
 	//glutPostRedisplay();
-	glutTimerFunc(TILE_FALL_SPEED, movetiledown, 0);
+	glutTimerFunc(tileFallSpeed, movetiledown, 0);
 
 }
 
@@ -320,8 +394,158 @@ void movetiledown(int value)
 void rotate()
 {      
 
+	for (int i=0; i<4; i++) 
+	{
+		tile[i] = curTileType[(curRotation + 1) % 4][i];
+	}
+
+	curRotation = (curRotation + 1) % 4;
+	int min_x = 0;
+	int max_x = 0;
+	int min_y = 0;
+	int max_y = 0;
+
+	for (int i = 0; i < 4; i++) 
+	{
+		int x = tilepos.x + tile[i].x; 
+		int y = tilepos.y + tile[i].y;
+
+
+		if (x < min_x)
+			min_x = x;
+		if (x > max_x)
+			max_x = x;
+		if (y < min_y)
+			min_y = y;
+		if (y > max_y)
+			max_y = y;
+	}
+			
+
+	tilepos.x = tilepos.x - min_x;
+	tilepos.y = tilepos.y - min_y; 
+
+	if (max_y > 19) 
+		tilepos.y = 2*tilepos.y - max_y;
+	if (max_x > 9)
+		tilepos.x = 2*tilepos.x - max_x;
+
+	if (collidingWithExisitingTile()) {
+		int tilesToMoveUp;
+		int tilesToMoveLeft;
+		int tilesToMoveRight;
+		
+		if ((tilesToMoveUp = youCanMoveUp()) > 0) {
+			moveUp(tilesToMoveUp);
+		} else if ((tilesToMoveLeft = youCanMoveLeft()) > 0)  {
+			moveLeft(tilesToMoveLeft);
+		 } else if (tilesToMoveRight = youCanMoveRight() > 0) {
+			moveRight(tilesToMoveRight);
+		} else {
+			// revert back
+			for (int i=0; i<4; i++) {
+				tile[i] = curTileType[(curRotation - 1) % 4][i];
+			}
+			curRotation = (curRotation - 1) % 4;	
+		}		
+	}
+	//std::cout<<tilepos.y<<","<<tile[0].x<<"; "; //1 -2
+
+	updatetile();
+
 }
 
+bool collidingWithExisitingTile() {
+	for (int i=0; i<4; i++) {
+		int x = tilepos.x + tile[i].x; 
+		int y = tilepos.y + tile[i].y;
+
+		if (board[x][y] == true) {
+			return true;
+		}
+	}
+	return false;
+}
+int youCanMoveUp() {
+	int min_y = 20;
+	int max_y = 0;
+	for (int i=0; i<4; i++) {
+		int x = tilepos.x + tile[i].x; 
+		int y = tilepos.y + tile[i].y;
+		if (board[x][y] == true) {
+			if (y < min_y)
+				min_y = y;
+				while (board[x][y] == true) {
+					if (y > max_y)
+						max_y = y;
+					y = y + 1;
+				}
+		}
+	}
+
+	int tilesToMoveUp = max_y - min_y + 1;
+	for (int i=0; i<4; i++) {
+		if (tilepos.y + tilesToMoveUp + tile[i].y > 19) {
+			return 0;
+		}
+	}
+	return 0;
+}
+void moveUp(int tilesToMoveUp) {
+	tilepos.y = tilepos.y + tilesToMoveUp;
+	updatetile();
+}
+
+int youCanMoveLeft() {
+	int min_x = 20;
+	int max_x = 0;
+	for (int i=0; i<4; i++) {
+		int x = tilepos.x + tile[i].x; 
+		int y = tilepos.y + tile[i].y;
+		if (board[x][y] == true) {
+			if (x < min_x)
+				min_x = x;
+			if (x > max_x)
+				max_x = x;
+		}
+	}
+	int tilesToMoveLeft = max_x - min_x + 1;
+	for (int i=0; i<4; i++) {
+		if (tilepos.x - tilesToMoveLeft + tile[i].x < 0) {
+			return 0;
+		}
+	}
+	return tilesToMoveLeft;
+}
+void moveLeft(int tilesToMoveLeft) {
+	tilepos.x = tilepos.x - tilesToMoveLeft;
+	updatetile();
+}
+int youCanMoveRight() {
+	int min_x = 20;
+	int max_x = 0;
+	for (int i=0; i<4; i++) {
+		int x = tilepos.x + tile[i].x; 
+		int y = tilepos.y + tile[i].y;
+		if (board[x][y] == true) {
+			if (x < min_x)
+				min_x = x;
+			if (x > max_x)
+				max_x = x;
+		}
+	}
+	int tilesToMoveRight = max_x - min_x + 1;
+	for (int i=0; i<4; i++) {
+		if (tilepos.x + tilesToMoveRight + tile[i].x > 9) {
+			return 0;
+		}
+	}
+	return tilesToMoveRight;
+}
+void moveRight(int tilesToMoveRight) {
+	tilepos.x = tilepos.x + tilesToMoveRight;
+	updatetile();
+}
 //-------------------------------------------------------------------------------------------------------------------
 
 // Checks if the specified row (0 is the bottom 19 the top) is full
@@ -336,27 +560,32 @@ void checkfullrow(int row)
 // Places the current tile - update the board vertex colour VBO and the array maintaining occupied cells
 void settile()
 {
-	glBindBuffer(GL_ARRAY_BUFFER, vboIDs[3]); 
 
+	glBindBuffer(GL_ARRAY_BUFFER, vboIDs[3]); 
 	// For each of the 4 'cells' of the tile,
 	for (int i = 0; i < 4; i++) 
 	{
 		// Calculate the grid coordinates of the cell
-		GLuint x = tilepos.x + tile[i].x; 
+		int x = tilepos.x + tile[i].x; 
 
-		GLuint y = tilepos.y + tile[i].y;
+		int y = tilepos.y + tile[i].y;
+
 		// adjust if the tile is 
 		// Create the 4 corners of the square - these vertices are using location in pixels
 		// These vertices are later converted by the vertex shader
 		for (int j=0; j < 6; j++) {
 			boardcolours[(x*6) + (y*60) + j] = tileCellColor[i];
 		}
+
 		board[x][y] = true;
 
 	}
 	glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(boardcolours), boardcolours); 
 
 	glBindVertexArray(0);
+
+	tileFallSpeed = DEFAULT_TILE_FALL_SPEED;
+
 
 }
 
@@ -376,6 +605,7 @@ bool movetile(vec2 direction)
 // Starts the game over - empties the board, creates new tiles, resets line counters
 void restart()
 {
+	tileFallSpeed = DEFAULT_TILE_FALL_SPEED;
 
 }
 //-------------------------------------------------------------------------------------------------------------------
@@ -418,8 +648,51 @@ void reshape(GLsizei w, GLsizei h)
 // Handle arrow key keypresses
 void special(int key, int x, int y)
 {
+	switch(key)
+	{
+		case GLUT_KEY_UP:
+			rotate();
+			break;
+		case GLUT_KEY_DOWN:
+			tileFallSpeed = 1;
+			//movetiledown(0);
+			break;
+		case GLUT_KEY_LEFT:
+			moveBlockLeft();
+			break;
+		case GLUT_KEY_RIGHT:
+			moveBlockRight();
+			break;
+	}
 }
 
+void moveBlockLeft()
+{
+	for (int i=0; i<4; i++) {
+		GLuint x = tilepos.x + tile[i].x; 
+		GLuint y = tilepos.y + tile[i].y;
+
+		if (x == 0) {
+			return;
+		}
+	}
+	tilepos.x = tilepos.x - 1;
+	updatetile();
+	
+}
+void moveBlockRight()
+{
+	for (int i=0; i<4; i++) {
+		GLuint x = tilepos.x + tile[i].x; 
+		GLuint y = tilepos.y + tile[i].y;
+
+		if (x == 9) {
+			return;
+		}
+	}
+	tilepos.x = tilepos.x + 1;
+	updatetile();
+}
 //-------------------------------------------------------------------------------------------------------------------
 
 // Handles standard keypresses
@@ -444,11 +717,13 @@ void keyboard(unsigned char key, int x, int y)
 void checkforbottom() 
 {
 	for (int i=0; i < 4; i++) {
-		GLuint x = tilepos.x + tile[i].x; 
-		GLuint y = tilepos.y + tile[i].y;	
+		int x = tilepos.x + tile[i].x; 
+		int y = tilepos.y + tile[i].y;	
 
 		if (y == 0 || board[x][y-1] == true) {
+
 			settile();
+
 			newtile();
 			break;
 		}
@@ -462,7 +737,7 @@ void checkforbottom()
 
 void idle(void)
 {
-	checkforbottom();
+	//checkforbottom();
 	glutPostRedisplay();
 }
 
@@ -484,7 +759,7 @@ int main(int argc, char **argv)
 	glutSpecialFunc(special);
 	glutKeyboardFunc(keyboard);
 	glutIdleFunc(idle);
-	glutTimerFunc(TILE_FALL_SPEED, movetiledown, 0);
+	glutTimerFunc(DEFAULT_TILE_FALL_SPEED, movetiledown, 0);
 
 	glutMainLoop(); // Start main loop
 	return 0;
