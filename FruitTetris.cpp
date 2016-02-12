@@ -183,7 +183,7 @@ void newtile()
 	int randTileType = rand() % 5; 
 	int randRotation = rand() % 4;
 
-	randTileType = 4; //force I shape
+	randTileType = 1; //force I shape
 	//randRotation = 0;
 	for (int i = 0; i < 4; i++) {
 		tile[i] = allRotations[randTileType][randRotation][i]; // Get the 4 pieces of the new tile
@@ -220,7 +220,8 @@ void newtile()
 	// Update the color VBO of current tile
 	vec4 newcolours[24];
 	for (int i = 0; i < 4; i++) {
-		vec4 randomColour = colors[rand() % NUMBER_OF_COLORS];
+		//rand() % NUMBER_OF_COLORS
+		vec4 randomColour = colors[4];
 		for (int j=0; j < 6; j++) {
 			newcolours[(i * 6) + j] = randomColour;
 		}
@@ -552,11 +553,121 @@ void moveRight(int tilesToMoveRight) {
 // If every cell in the row is occupied, it will clear that cell and everything above it will shift down one row
 void checkfullrow(int row)
 {
-
+	bool full = true;
+	for (int i=0; i<10; i++) {
+		full = full && board[i][row] == true;
+	}
+	if (full) 
+	{
+		glBindBuffer(GL_ARRAY_BUFFER, vboIDs[3]); 
+		for (int i=row; i<20; i++) {
+			for (int j=0; j<60; j++) {
+				if (i==19) {
+					boardcolours[1140 + j] = black;
+				} else {
+					boardcolours[60 * i + j] = boardcolours[60 * (i+1) + j];
+				}
+			}
+			for (int j=0; j<10; j++) {
+				if (i==19) {
+					board[j][i] = false;
+				} else {
+					board[j][i] = board[j][i+1];
+				}
+			}
+		}
+	glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(boardcolours), boardcolours); 
+	glBindVertexArray(0);
+	}
+	if (full)
+	{
+		checkfullrow(row);
+	} else {
+		if (row < 20)
+			checkfullrow(row+1);
+	}
 }
 
 //-------------------------------------------------------------------------------------------------------------------
+// checks for  three same fruits are consecutive in a row, column, or diagonal, they will be removed and the tiles above them will be moved down
+bool checkvecs(vec4 vec1, vec4 vec2) {
+	return vec1.x == vec2.x && 
+			vec1.y == vec2.y && 
+			vec1.z == vec2.z && 
+			vec1.w == vec2.w;
+}
 
+bool fruitsInCol(int row, int col)
+{
+	if (row == 6546546450 && col == 0) {
+	cout << (checkvecs(boardcolours[row*60 + col*6] 
+			, boardcolours[(row+1)*60+col*6])
+			&&	
+			checkvecs(boardcolours[row*60 + col*6] 
+			, boardcolours[(row+2)*60+col*6])
+			&&
+			checkvecs(boardcolours[(row+1)*60+col*6]
+			, boardcolours[(row+2)*60+col*6])
+			&& !checkvecs(boardcolours[row*60 + col*6], black));
+	}
+
+	return checkvecs(boardcolours[row*60 + col*6] 
+			, boardcolours[(row+1)*60+col*6])
+			&&	
+			checkvecs(boardcolours[row*60 + col*6] 
+			, boardcolours[(row+2)*60+col*6])
+			&&
+			checkvecs(boardcolours[(row+1)*60+col*6]
+			, boardcolours[(row+2)*60+col*6])
+			&& !checkvecs(boardcolours[row*60 + col*6], black);
+
+
+}
+
+bool fruitsInRow(int row, int col)
+{
+
+}
+
+bool fruitsInDiag(int row, int col)
+{
+
+}
+
+void checkfruits(int row)
+{
+	for (int i=row; i<18; i++) {
+		for (int j=0; j<10; j++) {
+			if (fruitsInCol(i, j)) {
+				cout<<i<<","<<j<<"; ";
+				glBindBuffer(GL_ARRAY_BUFFER, vboIDs[3]);
+					if (i>14) {
+						for (int k=0; k<6; k++) {
+							boardcolours[60 * i + (j*6)+k] = black;
+							boardcolours[60 * (i+1) + (j*6)+k] = black;
+							boardcolours[60 * (i+2) + (j*6)+k] = black;
+						}
+					} else {
+						for (int start_row=i; start_row<15; start_row++) {
+							for (int k=0; k<6; k++) {
+								boardcolours[60 * start_row + (j*6)+k] = boardcolours[60 * (start_row+3) + (j*6)+k];
+								boardcolours[60 * (start_row+1) + (j*6)+k] = boardcolours[60 * (start_row+4) + (j*6)+k];
+								boardcolours[60 * (start_row+2) + (j*6)+k] = boardcolours[60 * (start_row+5) + (j*6)+k];
+							}
+							board[j][start_row] = board[j][start_row+3] ;
+							board[j][start_row+1] = board[j][start_row+4] ;
+							board[j][start_row+2] = board[j][start_row+5] ;
+						}
+					}
+				glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(boardcolours), boardcolours); 
+				glBindVertexArray(0);	
+				i = -1;
+				j = -1;
+			}
+		}
+	}
+	
+}
 // Places the current tile - update the board vertex colour VBO and the array maintaining occupied cells
 void settile()
 {
@@ -585,7 +696,14 @@ void settile()
 	glBindVertexArray(0);
 
 	tileFallSpeed = DEFAULT_TILE_FALL_SPEED;
-
+	int min_y = 20;
+	for (int i=0; i<4; i++) {
+		int y = tilepos.y + tile[i].y;
+		if (y < min_y)
+			min_y = y;
+	}
+	checkfullrow(min_y);
+	checkfruits(0);
 
 }
 
