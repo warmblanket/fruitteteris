@@ -20,11 +20,13 @@ Modified in Sep 2014 by Honghua Li (honghual@sfu.ca).
 #include <unistd.h>
 
 #define TILE_FALL_SPEED 30
-#define DEFAULT_TILE_FALL_SPEED 400
+#define DEFAULT_TILE_FALL_SPEED 800
 #define NUMBER_OF_COLORS 5
 using namespace std;
 
-
+typedef struct {
+	vec2 tile_pos[4];
+} blockPosition; 
 // forward declarations
 
 void moveBlockLeft();
@@ -101,6 +103,8 @@ vec4 colors[NUMBER_OF_COLORS] = {orange, red, purple, yellow, green};
 vec4 tileCellColor[4];
 //board[x][y] represents whether the cell (x,y) is occupied
 bool board[10][20]; 
+
+blockPosition bp[10][20];
 
 //An array containing the colour of each of the 10*20*2*3 vertices that make up the board
 //Initially, all will be set to black. As tiles are placed, sets of 6 vertices (2 triangles; 1 square)
@@ -432,7 +436,7 @@ void rotate()
 		tilepos.x = 2*tilepos.x - max_x;
 
 	if (collidingWithExisitingTile()) {
-		int tilesToMoveUp;
+		/*int tilesToMoveUp;
 		int tilesToMoveLeft;
 		int tilesToMoveRight;
 		
@@ -442,14 +446,14 @@ void rotate()
 			moveLeft(tilesToMoveLeft);
 		 } else if (tilesToMoveRight = youCanMoveRight() > 0) {
 			moveRight(tilesToMoveRight);
-		} else {
+		} else {*/
 			// revert back
-			for (int i=0; i<4; i++) {
-				tile[i] = curTileType[(curRotation - 1) % 4][i];
-			}
-			curRotation = (curRotation - 1) % 4;	
-		}		
-	}
+		for (int i=0; i<4; i++) {
+			tile[i] = curTileType[(curRotation - 1) % 4][i];
+		}
+		curRotation = (curRotation - 1) % 4;	
+	}		
+	
 	//std::cout<<tilepos.y<<","<<tile[0].x<<"; "; //1 -2
 
 	updatetile();
@@ -490,7 +494,7 @@ int youCanMoveUp() {
 			return 0;
 		}
 	}
-	return 0;
+	return tilesToMoveUp;
 }
 void moveUp(int tilesToMoveUp) {
 	tilepos.y = tilepos.y + tilesToMoveUp;
@@ -633,13 +637,58 @@ bool fruitsInDiag(int row, int col)
 {
 
 }
+void checkSiblingBlockTiles(int j, int i, vec2 tilepos) 
+{
+	int x = tilepos.x;
+	int y = tilepos.y;
+	for (int k=0; k<4; k++)
+	{
+		if (x >= 0 && bp[x][y].tile_pos[k] == vec2(j, i))
+		{
+			bp[x][y].tile_pos[k] = vec2(-1,0);
+		}
+	}
+	if (x >=0 && board[x][y])
+	{
+		cout<<x<<","<<y<<"; ";
+		glBindBuffer(GL_ARRAY_BUFFER, vboIDs[3]);
+		y = y - 1; //move to next row
+		while (y >= 0 && !board[x][y])
+		{
+			for (int i=0; i<6; i++)
+			{
+				vec4 temp = boardcolours[60 * (y+1) + (x*6)+i];
+				boardcolours[60 * (y+1) + (x*6)+i] = boardcolours[60 * (y) + (x*6)+i];
+				boardcolours[60 * (y) + (x*6)+i] = temp;
+			}
+			board[x][y+1] = false;
+			board[x][y] = true;
+			y--;
+		}
+		glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(boardcolours), boardcolours); 
+		glBindVertexArray(0);
+	}
+}
+void sortBlockPositionArray(vec2 blocks[4])
+{
+	for (int i=1; i<4; i++) 
+	{
+		for (int k=i; k > 0 && blocks[k].y < blocks[k-1].y; k--)
+		{
+			vec2 temp = blocks[k];
+			blocks[k] = blocks[k-1];
+			blocks[k-1] = temp;
+		}
 
+	}
+	
+}
 void checkfruits(int row)
 {
 	for (int i=row; i<18; i++) {
 		for (int j=0; j<10; j++) {
 			if (fruitsInCol(i, j)) {
-				cout<<i<<","<<j<<"; ";
+			//	cout<<i<<","<<j<<"; ";
 				glBindBuffer(GL_ARRAY_BUFFER, vboIDs[3]);
 					if (i>14) {
 						for (int k=0; k<6; k++) {
@@ -647,8 +696,12 @@ void checkfruits(int row)
 							boardcolours[60 * (i+1) + (j*6)+k] = black;
 							boardcolours[60 * (i+2) + (j*6)+k] = black;
 						}
+							board[j][i] = false;
+							board[j][i+1] = false ;
+							board[j][i+2] = false ;
 					} else {
-						for (int start_row=i; start_row<15; start_row++) {
+						for (int start_row=i; start_row<15; start_row+=3) {
+
 							for (int k=0; k<6; k++) {
 								boardcolours[60 * start_row + (j*6)+k] = boardcolours[60 * (start_row+3) + (j*6)+k];
 								boardcolours[60 * (start_row+1) + (j*6)+k] = boardcolours[60 * (start_row+4) + (j*6)+k];
@@ -658,7 +711,29 @@ void checkfruits(int row)
 							board[j][start_row+1] = board[j][start_row+4] ;
 							board[j][start_row+2] = board[j][start_row+5] ;
 						}
+
 					}
+				for (int k=0; k<4; k++) 
+				{
+					//sort the blocks by their y value - this is because sometimes the block aboove is processed first and its like 'HELL YA I HAVE SOMETHING BENEATH ME' and then the 
+					//tile it sits on is processed and moves down leaving the tiel above
+					sortBlockPositionArray(bp[j][i].tile_pos);
+					sortBlockPositionArray(bp[j][i+1].tile_pos);
+					sortBlockPositionArray(bp[j][i+2].tile_pos);
+
+					//for each block tile im holding values for its 'sibling' tiles should be - these values are set at the settile method - its checked to see if any of these tiles still exists
+					//if they do move them down til they hit tiles or floor
+					checkSiblingBlockTiles(j, i, bp[j][i].tile_pos[k]);
+					checkSiblingBlockTiles(j, i+1, bp[j][i+1].tile_pos[k]);
+					checkSiblingBlockTiles(j, i+2, bp[j][i+2].tile_pos[k]);
+
+					//and then i reset the blockpositions held at these tiles were removing - that is these tiles dont have siblings anymore - any access to them should think of them as orphans
+					//they should already be in correct positions due to above so i shouldnt need to worry about bringing them down and preventing floating -  note that theyre tagged -1, 0 as 0,0
+					//is a valid game tile
+					bp[j][i].tile_pos[k] = vec2(-1, 0);
+					bp[j][i+1].tile_pos[k] = vec2(-1, 0);
+					bp[j][i+2].tile_pos[k] = vec2(-1, 0);
+				}
 				glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(boardcolours), boardcolours); 
 				glBindVertexArray(0);	
 				i = -1;
@@ -674,6 +749,7 @@ void settile()
 
 	glBindBuffer(GL_ARRAY_BUFFER, vboIDs[3]); 
 	// For each of the 4 'cells' of the tile,
+	vec2 store[4];
 	for (int i = 0; i < 4; i++) 
 	{
 		// Calculate the grid coordinates of the cell
@@ -687,8 +763,25 @@ void settile()
 		for (int j=0; j < 6; j++) {
 			boardcolours[(x*6) + (y*60) + j] = tileCellColor[i];
 		}
-
+		
 		board[x][y] = true;
+		store[i] = vec2(x,y);
+	//	cout<<bp[x][y].tile_pos[i];
+
+	}
+	for (int i=0; i<4; i++)
+	{
+		int x = store[i].x;
+		int y = store[i].y;
+		for (int j=0; j<4; j++)
+		{
+			bp[x][y].tile_pos[j] = store[j];
+		}
+
+	}
+	for (int i=0; i<4; i++) 
+	{
+		//cout << bp[5][1].tile_pos[i];
 
 	}
 	glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(boardcolours), boardcolours); 
